@@ -91,7 +91,13 @@ Route::group(['middleware' => 'auth'], function () {
             Route::delete('/{user}', [UserController::class, 'destroy'])->name('destroy');
         });
 
-        Route::resource('/', UserController::class)->parameters(['' => 'user']);
+        // Apenas index e show: create/store/edit/update/destroy já estão definidas
+        // acima com suas permissões. O resource completo duplicava esses nomes
+        // e impedia o "php artisan route:cache".
+        Route::resource('/', UserController::class)
+            ->only(['index', 'show'])
+            ->parameters(['' => 'user']);
+
         Route::get('/{user}/buscar', [UserController::class, 'search'])->name('search');
     });
 
