@@ -1,49 +1,42 @@
-FROM php:8.3-fpm
+# ------------------------------------------------------------
+# JITTE Academy — imagem de produção (Laravel + Nginx + PHP-FPM)
+# Mesmo padrão do JITTE Gestão.
+# ------------------------------------------------------------
 
-# set your user name, ex: user=carlos
-ARG user=yourusername
-ARG uid=1000
+# Etapa 1: compila os assets do front (Vite)
+# Se o projeto não usa Vite/npm, apague esta etapa e a linha
+# "COPY --from=assets" lá embaixo.
+FROM node:20-alpine AS assets
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    libpng-dev \
-    libonig-dev \
-    libxml2-dev \
-    zip \
-    unzip \
-    gnupg \
-    build-essential
+# Etapa 2: aplicação PHP
+# Ajuste a versão do PHP para a que o projeto usa (8.2, 8.3, 8.4)
+FROM serversideup/php:8.3-fpm-nginx
 
-# Clear cache
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+# Extensões PHP extras que o projeto precisar (ex.: intl, gd, bcmath)
+USER root
+RUN install-php-extensions intl gd bcmath
+USER www-data
 
-# Install PHP extensions
-RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd sockets
+ENV PHP_OPCACHE_ENABLE=1
 
-# Install Node.js and npm
-RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs
+WORKDIR /var/www/html
 
+# Dependências do Composer primeiro (aproveita cache entre deploys)
+COPY --chown=www-data:www-data composer.json composer.lock ./
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist --no-interaction
 
-# Get latest Composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# Código da aplicação
+COPY --chown=www-data:www-data . .
 
-# Create system user to run Composer and Artisan Commands
-RUN useradd -G www-data,root -u $uid -d /home/$user $user
-RUN mkdir -p /home/$user/.composer && \
-    chown -R $user:$user /home/$user
+# Assets compilados na etapa 1
+COPY --from=assets --chown=www-data:www-data /app/public/build ./public/build
 
-# Install redis
-RUN pecl install -o -f redis \
-    &&  rm -rf /tmp/pear \
-    &&  docker-php-ext-enable redis
+RUN composer dump-autoload --optimize --no-dev
 
-# Set working directory
-WORKDIR /var/www
-
-# Copy custom configurations PHP
-COPY docker/php/custom.ini /usr/local/etc/php/conf.d/custom.ini
-
-USER $user
+# A imagem serve a aplicação na porta 8080
+EXPOSE 8080
